@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+*.zip
+uv.lock
+.playwright-mcp/
+map-*.png
+charts-*.png

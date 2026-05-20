@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NYC Heat Vulnerability: Air Conditioning Access | Cornell Tech Urban Tech Hub</title>
+  <meta name="description" content="Interactive map of air conditioning access across New York City census tracts, with socioeconomic context. Data from the US Census Bureau LACE dataset." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@3/dist/maplibre-gl.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@3/dist/maplibre-gl.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-deep:   #080c14;
+      --bg-panel:  #0f1520;
+      --bg-card:   #161f2e;
+      --border:    rgba(255,255,255,0.07);
+      --border-hi: rgba(255,255,255,0.14);
+      --text-1:    #f1f5f9;
+      --text-2:    #94a3b8;
+      --text-3:    #4a5568;
+      --cornell:   #b31b1b;
+      --blue:      #3b82f6;
+      --radius:    8px;
+      --sidebar-w: 310px;
+      --detail-w:  340px;
+    }
+
+    html, body { width: 100%; height: 100%; overflow: hidden; font-family: 'Inter', system-ui, sans-serif; background: var(--bg-deep); color: var(--text-1); }
+
+    /* ── Map ─────────────────────────────────────────────── */
+    #map { position: absolute; inset: 0; }
+    .maplibregl-ctrl-attrib { display: none; }
+
+    /* ── Sidebar ─────────────────────────────────────────── */
+    #sidebar {
+      position: absolute;
+      top: 0; left: 0;
+      width: var(--sidebar-w);
+      height: 100vh;
+      background: rgba(8,12,20,0.96);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      z-index: 20;
+      overflow: hidden;
+    }
+
+    .sidebar-scroll { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+    .sidebar-scroll::-webkit-scrollbar { width: 4px; }
+    .sidebar-scroll::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+    /* Header */
+    .header {
+      padding: 18px 20px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .org-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 12px;
+    }
+    .cornell-chip {
+      background: var(--cornell);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      padding: 3px 7px;
+      border-radius: 3px;
+      line-height: 1.4;
+    }
+    .org-name {
+      font-size: 10.5px;
+      color: var(--text-2);
+      font-weight: 500;
+      line-height: 1.4;
+    }
+    .org-name strong { display: block; color: var(--text-1); font-weight: 600; }
+    h1 { font-size: 16px; font-weight: 700; color: var(--text-1); line-height: 1.35; margin-bottom: 4px; }
+    .tagline { font-size: 12px; color: var(--text-2); }
+
+    /* Section */
+    .section { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+    .section-label {
+      font-size: 10px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--text-3);
+      margin-bottom: 10px;
+    }
+
+    /* Layer Buttons */
+    .layer-grid { display: flex; flex-direction: column; gap: 4px; }
+    .layer-group { margin-bottom: 6px; }
+    .layer-group-label { font-size: 10px; color: var(--text-3); font-weight: 600; letter-spacing:.06em; text-transform: uppercase; margin-bottom: 4px; }
+    .layer-row { display: flex; gap: 4px; }
+    .layer-btn {
+      flex: 1;
+      padding: 7px 8px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-2);
+      font-size: 11.5px; font-weight: 500;
+      cursor: pointer;
+      transition: all .15s ease;
+      text-align: center;
+      line-height: 1.3;
+      white-space: nowrap;
+    }
+    .layer-btn:hover { border-color: var(--border-hi); color: var(--text-1); background: rgba(255,255,255,0.04); }
+    .layer-btn.active {
+      background: rgba(255,255,255,0.08);
+      border-color: var(--layer-color, var(--blue));
+      color: var(--text-1);
+      font-weight: 600;
+      box-shadow: 0 0 0 1px var(--layer-color, var(--blue)) inset;
+    }
+
+    /* Legend */
+    .legend-bar {
+      height: 10px;
+      border-radius: 5px;
+      margin-bottom: 6px;
+    }
+    .legend-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-2);
+      margin-bottom: 4px;
+    }
+    .legend-title { font-size: 11px; color: var(--text-3); }
+    .layer-desc { font-size: 11.5px; color: var(--text-2); line-height: 1.5; margin-top: 8px; }
+
+    /* Stats summary */
+    .stat-row { display: flex; gap: 8px; margin-top: 8px; }
+    .stat-chip {
+      flex: 1;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      text-align: center;
+    }
+    .stat-chip .val { font-size: 15px; font-weight: 700; color: var(--text-1); }
+    .stat-chip .lbl { font-size: 9.5px; color: var(--text-3); text-transform: uppercase; letter-spacing:.06em; margin-top: 2px; }
+
+    /* ── Tooltip ─────────────────────────────────────────── */
+    #tooltip {
+      position: absolute;
+      pointer-events: none;
+      z-index: 50;
+      background: rgba(8,12,20,0.95);
+      border: 1px solid var(--border-hi);
+      border-radius: 8px;
+      padding: 10px 14px;
+      max-width: 220px;
+      backdrop-filter: blur(12px);
+      display: none;
+    }
+    .tt-name { font-size: 12px; font-weight: 600; color: var(--text-1); margin-bottom: 4px; }
+    .tt-main { font-size: 20px; font-weight: 700; line-height: 1; margin-bottom: 2px; }
+    .tt-label { font-size: 11px; color: var(--text-2); }
+    .tt-divider { height: 1px; background: var(--border); margin: 8px 0; }
+    .tt-row { display: flex; justify-content: space-between; font-size: 11px; gap: 16px; margin-bottom: 3px; }
+    .tt-row .k { color: var(--text-3); }
+    .tt-row .v { color: var(--text-2); font-weight: 500; }
+
+    /* ── Detail Panel ────────────────────────────────────── */
+    #detail {
+      position: absolute;
+      top: 0; right: 0;
+      width: var(--detail-w);
+      height: 100vh;
+      background: rgba(8,12,20,0.97);
+      backdrop-filter: blur(16px);
+      border-left: 1px solid var(--border);
+      z-index: 20;
+      transform: translateX(100%);
+      transition: transform .25s cubic-bezier(.4,0,.2,1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #detail.open { transform: translateX(0); }
+
+    .detail-header {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .detail-close {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .detail-borough {
+      font-size: 10px; font-weight: 700; letter-spacing:.1em; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 12px; background: rgba(255,255,255,0.08);
+    }
+    .close-btn {
+      width: 28px; height: 28px;
+      border-radius: 6px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-2);
+      cursor: pointer;
+      font-size: 16px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .15s;
+    }
+    .close-btn:hover { background: rgba(255,255,255,0.07); color: var(--text-1); }
+    .detail-tract-name { font-size: 14px; font-weight: 700; color: var(--text-1); }
+
+    .detail-scroll { flex: 1; overflow-y: auto; padding: 16px 18px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+    /* Big number */
+    .big-stat {
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .big-num { font-size: 40px; font-weight: 800; line-height: 1; }
+    .big-sub { font-size: 12px; color: rgba(255,255,255,0.7); margin-top: 4px; }
+
+    /* Metric rows in detail panel */
+    .metrics-section { margin-bottom: 16px; }
+    .metrics-title { font-size: 10px; font-weight: 700; letter-spacing:.1em; text-transform: uppercase; color: var(--text-3); margin-bottom: 8px; }
+    .metric-item { margin-bottom: 10px; }
+    .metric-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
+    .metric-name { font-size: 12px; color: var(--text-2); }
+    .metric-val { font-size: 12px; font-weight: 600; color: var(--text-1); }
+    .metric-bar-bg { height: 4px; background: rgba(255,255,255,0.07); border-radius: 2px; overflow: hidden; }
+    .metric-bar { height: 100%; border-radius: 2px; transition: width .4s ease; }
+
+    /* Race breakdown */
+    .race-stack { height: 8px; border-radius: 4px; display: flex; overflow: hidden; margin-bottom: 4px; }
+    .race-labels { display: flex; gap: 8px; flex-wrap: wrap; }
+    .race-dot { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--text-2); }
+    .race-dot::before { content:''; display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--c); }
+
+    /* ── No-data badge ───────────────────────────────────── */
+    .no-data-badge {
+      font-size: 10px;
+      color: var(--text-3);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+    }
+
+    /* ── Attribution strip ───────────────────────────────── */
+    #attribution {
+      position: absolute;
+      bottom: 0; left: var(--sidebar-w);
+      right: 0;
+      background: rgba(8,12,20,0.85);
+      backdrop-filter: blur(8px);
+      border-top: 1px solid var(--border);
+      padding: 7px 14px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 10.5px;
+      color: var(--text-3);
+      z-index: 15;
+      flex-wrap: wrap;
+    }
+    #attribution a { color: var(--text-2); text-decoration: none; }
+    #attribution a:hover { color: var(--text-1); text-decoration: underline; }
+    .attr-sep { color: var(--text-3); opacity: .4; }
+
+    /* ── Zoom hint ───────────────────────────────────────── */
+    #zoom-hint {
+      position: absolute;
+      bottom: 36px; right: 14px;
+      background: rgba(8,12,20,0.85);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 11px;
+      color: var(--text-3);
+      z-index: 15;
+      pointer-events: none;
+    }
+
+    /* ── Loading overlay ─────────────────────────────────── */
+    #loading {
+      position: absolute;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-deep);
+      gap: 16px;
+    }
+    #loading.hidden { display: none; }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--border-hi);
+      border-top-color: var(--cornell);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { font-size: 14px; color: var(--text-2); }
+    .loading-sub { font-size: 12px; color: var(--text-3); }
+
+    /* ── Charts panel ───────────────────────────────────── */
+    #charts-panel {
+      position: absolute;
+      inset: 0;
+      z-index: 30;
+      background: rgba(8,12,20,0.98);
+      backdrop-filter: blur(16px);
+      display: flex;
+      flex-direction: column;
+      transform: translateY(100%);
+      transition: transform .3s cubic-bezier(.4,0,.2,1);
+      overflow: hidden;
+    }
+    #charts-panel.open { transform: translateY(0); }
+
+    .charts-header {
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .charts-header h2 { font-size: 15px; font-weight: 700; color: var(--text-1); }
+    .charts-header p  { font-size: 12px; color: var(--text-3); flex: 1; }
+    .charts-header .close-btn { margin-left: auto; }
+
+    .charts-legend {
+      display: flex; gap: 16px; flex-wrap: wrap;
+      padding: 8px 24px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .borough-dot {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; color: var(--text-2);
+    }
+    .borough-dot span {
+      width: 9px; height: 9px; border-radius: 50%;
+      display: inline-block; background: var(--c);
+    }
+
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(2, 1fr);
+      gap: 1px;
+      background: var(--border);
+      flex: 1;
+      min-height: 0;
+    }
+    .chart-cell {
+      background: var(--bg-panel);
+      display: flex;
+      flex-direction: column;
+      padding: 10px 8px 6px;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .chart-cell canvas { display: block; width: 100% !important; height: 100% !important; flex: 1; min-height: 0; }
+
+    .chart-toggle-btn {
+      width: 100%;
+      padding: 10px;
+      border-radius: var(--radius);
+      background: var(--bg-card);
+      border: 1px solid var(--border-hi);
+      color: var(--text-2);
+      font-size: 12.5px; font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .chart-toggle-btn:hover { background: rgba(255,255,255,0.06); color: var(--text-1); border-color: rgba(255,255,255,0.2); }
+
+    /* ── Mobile ──────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      :root { --sidebar-w: 100vw; --detail-w: 100vw; }
+      #sidebar { height: auto; max-height: 50vh; top: auto; bottom: 0; border-right: none; border-top: 1px solid var(--border); }
+      #attribution { left: 0; }
+      #sidebar.collapsed { transform: translateY(calc(100% - 52px)); }
+      #mobile-toggle { display: flex; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text">Loading NYC tract data…</div>
+  <div class="loading-sub">Fetching 2,324 census tracts</div>
+</div>
+
+<!-- Map -->
+<div id="map"></div>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <div class="header">
+    <div class="org-badge">
+      <div class="cornell-chip">Cornell Tech</div>
+      <div class="org-name">
+        <strong>Urban Tech Hub</strong>
+        urban.tech.cornell.edu
+      </div>
+    </div>
+    <h1>NYC Heat Vulnerability:<br/>Air Conditioning Access</h1>
+    <div class="tagline">2023 Census Tract Data — 5 Boroughs</div>
+  </div>
+
+  <div class="sidebar-scroll">
+    <!-- Layer selector -->
+    <div class="section">
+      <div class="section-label">Explore Layers</div>
+      <div class="layer-grid" id="layer-grid">
+
+        <div class="layer-group">
+          <div class="layer-group-label">🌡 Air Conditioning</div>
+          <div class="layer-row">
+            <button class="layer-btn active" data-key="no_ac_pct" style="--layer-color:#ef4444">% Without AC</button>
+            <button class="layer-btn" data-key="ac_pct" style="--layer-color:#22d3ee">% With AC</button>
+          </div>
+        </div>
+
+        <div class="layer-group">
+          <div class="layer-group-label">💰 Socioeconomic</div>
+          <div class="layer-row">
+            <button class="layer-btn" data-key="median_income" style="--layer-color:#34d399">Income</button>
+            <button class="layer-btn" data-key="poverty_rate" style="--layer-color:#fb923c">Poverty</button>
+          </div>
+          <div class="layer-row" style="margin-top:4px">
+            <button class="layer-btn" data-key="renter_rate" style="--layer-color:#a78bfa">Renters</button>
+            <button class="layer-btn" data-key="elderly_rate" style="--layer-color:#fbbf24">Elderly (65+)</button>
+          </div>
+        </div>
+
+        <div class="layer-group">
+          <div class="layer-group-label">👥 Race & Ethnicity</div>
+          <div class="layer-row">
+            <button class="layer-btn" data-key="black_rate" style="--layer-color:#60a5fa">% Black</button>
+            <button class="layer-btn" data-key="hispanic_rate" style="--layer-color:#f87171">% Hispanic</button>
+            <button class="layer-btn" data-key="white_rate" style="--layer-color:#e2e8f0">% White</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="section" id="legend-section">
+      <div class="section-label">Legend</div>
+      <div class="legend-bar" id="legend-bar"></div>
+      <div class="legend-labels">
+        <span id="legend-min"></span>
+        <span id="legend-max"></span>
+      </div>
+      <div class="legend-title" id="legend-title"></div>
+      <div class="layer-desc" id="layer-desc"></div>
+      <div class="stat-row">
+        <div class="stat-chip">
+          <div class="val" id="stat-median"></div>
+          <div class="lbl">NYC Median</div>
+        </div>
+        <div class="stat-chip">
+          <div class="val" id="stat-lowest"></div>
+          <div class="lbl">Lowest Tract</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts button -->
+    <div class="section" style="padding-bottom:14px">
+      <button class="chart-toggle-btn" id="show-charts">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1" y="8" width="3" height="7" rx="1" fill="currentColor"/><rect x="6" y="5" width="3" height="10" rx="1" fill="currentColor"/><rect x="11" y="2" width="3" height="13" rx="1" fill="currentColor"/></svg>
+        Explore Correlations
+      </button>
+    </div>
+
+    <!-- About / Context -->
+    <div class="section">
+      <div class="section-label">About This Map</div>
+      <div style="font-size:11.5px; color:var(--text-2); line-height:1.6;">
+        <p style="margin-bottom:8px">
+          Air conditioning access is a critical factor in heat vulnerability. In NYC, more than 300 people die from heat-related causes each year — most are elderly, low-income, or rent their homes.
+        </p>
+        <p style="margin-bottom:8px">
+          Use the layers above to explore how AC access correlates with income, poverty, renter status, race, and age across all 2,324 census tracts.
+        </p>
+        <p>
+          <strong style="color:var(--text-1)">AC data:</strong> <a href="https://www.census.gov/data/experimental-data-products/lace.html" target="_blank" style="color:var(--blue)">LACE 2023</a> (US Census Bureau &amp; ASU). <strong style="color:var(--text-1)">Socioeconomic data:</strong> ACS 5-Year 2022.
+        </p>
+      </div>
+    </div>
+
+  </div><!-- end scroll -->
+</div><!-- end sidebar -->
+
+<!-- Hover tooltip -->
+<div id="tooltip">
+  <div class="tt-name" id="tt-name"></div>
+  <div class="tt-main" id="tt-main"></div>
+  <div class="tt-label" id="tt-label"></div>
+  <div class="tt-divider"></div>
+  <div class="tt-row"><span class="k">Median Income</span><span class="v" id="tt-income"></span></div>
+  <div class="tt-row"><span class="k">Poverty Rate</span><span class="v" id="tt-poverty"></span></div>
+  <div class="tt-row"><span class="k">% Renters</span><span class="v" id="tt-renters"></span></div>
+</div>
+
+<!-- Detail panel -->
+<div id="detail">
+  <div class="detail-header">
+    <div class="detail-close">
+      <span class="detail-borough" id="detail-borough"></span>
+      <button class="close-btn" id="close-detail">✕</button>
+    </div>
+    <div class="detail-tract-name" id="detail-name"></div>
+  </div>
+  <div class="detail-scroll" id="detail-scroll"></div>
+</div>
+
+<!-- Charts panel -->
+<div id="charts-panel">
+  <div class="charts-header">
+    <h2>AC Access vs. Socioeconomic Indicators</h2>
+    <p>Each dot = one census tract &nbsp;·&nbsp; Line = OLS fit &nbsp;·&nbsp; r = Pearson correlation</p>
+    <button class="close-btn" id="close-charts">✕</button>
+  </div>
+  <div class="charts-legend">
+    <span class="borough-dot"><span style="--c:#f87171"></span>Manhattan</span>
+    <span class="borough-dot"><span style="--c:#fbbf24"></span>Brooklyn</span>
+    <span class="borough-dot"><span style="--c:#34d399"></span>Queens</span>
+    <span class="borough-dot"><span style="--c:#60a5fa"></span>Bronx</span>
+    <span class="borough-dot"><span style="--c:#c084fc"></span>Staten Island</span>
+  </div>
+  <div class="charts-grid" id="charts-grid">
+    <!-- filled by JS -->
+  </div>
+</div>
+
+<!-- Attribution -->
+<div id="attribution">
+  <span>
+    <strong style="color:var(--text-2)">Data:</strong>
+    <a href="https://www.census.gov/data/experimental-data-products/lace.html" target="_blank">US Census Bureau / ASU LACE 2023</a>
+    <span class="attr-sep">·</span>
+    ACS 5-Year 2022
+  </span>
+  <span class="attr-sep">|</span>
+  <span>
+    <strong style="color:var(--text-2)">Built by:</strong>
+    <a href="https://urban.tech.cornell.edu" target="_blank">Cornell Tech Urban Tech Hub</a>
+  </span>
+  <span class="attr-sep">|</span>
+  <span>Map © <a href="https://carto.com/attributions" target="_blank">CARTO</a> / <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a></span>
+</div>
+
+<div id="zoom-hint">Scroll or pinch to zoom · Click a tract for details</div>
+
+<script>
+// ──────────────────────────────────────────────────────────────
+// Layer configuration
+// ──────────────────────────────────────────────────────────────
+const LAYERS = {
+  no_ac_pct: {
+    label: '% Without AC',
+    unit: '%',
+    format: v => v.toFixed(1) + '%',
+    desc: 'Share of occupied housing units without air conditioning. Higher values indicate greater heat vulnerability.',
+    colors: ['#fff5f0','#fde0d0','#fcbba1','#fb9180','#f76249','#d42b0e','#8b0000'],
+    gradient: 'linear-gradient(90deg,#fff5f0,#fcbba1,#f76249,#8b0000)',
+    layerColor: '#ef4444',
+    legendLow: 'Low (better)',
+    legendHigh: 'High (worse)',
+  },
+  ac_pct: {
+    label: '% With AC',
+    unit: '%',
+    format: v => v.toFixed(1) + '%',
+    desc: 'Share of occupied housing units with air conditioning.',
+    colors: ['#440154','#3b528b','#21918c','#5ec962','#fde725'],
+    gradient: 'linear-gradient(90deg,#440154,#21918c,#fde725)',
+    layerColor: '#22d3ee',
+    legendLow: 'Low (73%)',
+    legendHigh: 'High (100%)',
+  },
+  median_income: {
+    label: 'Median Household Income',
+    unit: '$',
+    format: v => '$' + Math.round(v/1000) + 'K',
+    desc: 'Median household income from ACS 2022. Low-income residents are less likely to afford AC installation and electricity costs.',
+    colors: ['#f7fcf0','#ccebc5','#7bccc4','#2b8cbe','#08306b'],
+    gradient: 'linear-gradient(90deg,#f7fcf0,#7bccc4,#08306b)',
+    layerColor: '#34d399',
+    legendLow: 'Lower',
+    legendHigh: 'Higher',
+  },
+  poverty_rate: {
+    label: 'Poverty Rate',
+    unit: '%',
+    format: v => v.toFixed(1) + '%',
+    desc: 'Percentage of residents below the federal poverty line (ACS 2022). Poverty is strongly associated with reduced AC access.',
+    colors: ['#ffffd4','#fed98e','#fe9929','#d95f0e','#7f2704'],
+    gradient: 'linear-gradient(90deg,#ffffd4,#fe9929,#7f2704)',
+    layerColor: '#fb923c',
+    legendLow: 'Low',
+    legendHigh: 'High',
+  },
+  renter_rate: {
+    label: '% Renter-Occupied',
+    unit: '%',
+    format: v => v.toFixed(1) + '%',
+    desc: 'Share of occupied units that are renter-occupied. Renters often cannot install window AC units, or face restricted energy use.',
+    colors: ['#f7f4f9','#d4b9da','#c994c7','#df65b0','#91003f'],
+    gradient: 'linear-gradient(90deg,#f7f4f9,#c994c7,#91003f)',
+    layerColor: '#a78bfa',
+    legendLow: '0%',
+    legendHigh: '100%',
+  },
+  elderly_rate: {
+    label: '% Elderly (65+)',
+    unit: '%',
+    format: v => v.toFixed(1) + '%',
+    desc: 'Percentage of population aged 65 and older. Elderly residents face heightened heat mortality risk — NYC heat deaths are disproportionately among this group.',
+    colors: ['#ffffd9','#edf8b1','#c7e9b4','#7fcdbb','#1d91c0','#0c2c84'],
+    gradient: 'linear-gradient(90deg,#ffffd9,#7fcdbb,#0c2c84)',
+    layerColor: '#fbbf24',
+    legendLow: 'Low',
+    legendHigh: 'High',
+  },
+  black_rate: {
+    label: '% Black',
+    unit: '%',
+    format: v => v.toFixed(1) + '%',
+    desc: 'Percentage identifying as Black or African American alone (ACS 2022). Research documents racial disparities in AC access linked to income, housing type, and redlining history.',
+    colors: ['#f7fbff','#c6dbef','#6baed6','#2171b5','#08306b'],
+    gradient: 'linear-gradient(90deg,#f7fbff,#6baed6,#08306b)',
+    layerColor: '#60a5fa',
+    legendLow: '0%',
+    legendHigh: '100%',
+  },
+  hispanic_rate: {
+    label: '% Hispanic/Latino',
+    unit: '%',
+    format: v => v.toFixed(1) + '%',
+    desc: 'Percentage identifying as Hispanic or Latino of any race (ACS 2022).',
+    colors: ['#fff5eb','#fdd0a2','#fdae6b','#fd8d3c','#a63603'],
+    gradient: 'linear-gradient(90deg,#fff5eb,#fdae6b,#a63603)',
+    layerColor: '#f87171',
+    legendLow: '0%',
+    legendHigh: '100%',
+  },
+  white_rate: {
+    label: '% White',
+    unit: '%',
+    format: v => v.toFixed(1) + '%',
+    desc: 'Percentage identifying as White alone (ACS 2022).',
+    colors: ['#f7f4f9','#d9d9d9','#969696','#636363','#252525'],
+    gradient: 'linear-gradient(90deg,#f7f4f9,#969696,#252525)',
+    layerColor: '#e2e8f0',
+    legendLow: '0%',
+    legendHigh: '100%',
+  },
+};
+
+// ──────────────────────────────────────────────────────────────
+// Utilities
+// ──────────────────────────────────────────────────────────────
+function quantileBreaks(features, key, n) {
+  const vals = features.map(f => f.properties[key]).filter(v => v != null).sort((a, b) => a - b);
+  if (vals.length < 2) return null;
+  const breaks = [];
+  for (let i = 0; i < n; i++) {
+    const idx = Math.floor(i / (n - 1) * (vals.length - 1));
+    breaks.push(vals[idx]);
+  }
+  return breaks;
+}
+
+function buildColorExpr(features, key, colors) {
+  const breaks = quantileBreaks(features, key, colors.length);
+  if (!breaks) return '#444';
+  const expr = ['interpolate', ['linear'], ['coalesce', ['get', key], -1]];
+  expr.push(-1, 'rgba(0,0,0,0)');
+  for (let i = 0; i < colors.length; i++) expr.push(breaks[i], colors[i]);
+  return expr;
+}
+
+function median(features, key) {
+  const vals = features.map(f => f.properties[key]).filter(v => v != null).sort((a, b) => a - b);
+  if (!vals.length) return null;
+  return vals[Math.floor(vals.length / 2)];
+}
+
+function fmt(v, key) {
+  if (v == null) return '—';
+  return LAYERS[key].format(v);
+}
+
+function fmtIncome(v) {
+  if (v == null) return '—';
+  return '$' + v.toLocaleString();
+}
+
+// ──────────────────────────────────────────────────────────────
+// Map init
+// ──────────────────────────────────────────────────────────────
+const map = new maplibregl.Map({
+  container: 'map',
+  style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+  center: [-73.977, 40.706],
+  zoom: 10.3,
+  minZoom: 9,
+  maxZoom: 16,
+  maxBounds: [[-74.4, 40.4], [-73.6, 40.98]],
+});
+
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+
+let geojson = null;
+let activeKey = 'no_ac_pct';
+
+// ──────────────────────────────────────────────────────────────
+// Load data
+// ──────────────────────────────────────────────────────────────
+map.on('load', async () => {
+  try {
+    const resp = await fetch('data/nyc_ac_tracts.geojson');
+    geojson = await resp.json();
+
+    map.addSource('tracts', { type: 'geojson', data: geojson, promoteId: 'GEOID' });
+
+    map.addLayer({
+      id: 'tracts-fill',
+      type: 'fill',
+      source: 'tracts',
+      paint: {
+        'fill-color': buildColorExpr(geojson.features, activeKey, LAYERS[activeKey].colors),
+        'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.92, 0.78],
+      },
+    });
+
+    map.addLayer({
+      id: 'tracts-outline',
+      type: 'line',
+      source: 'tracts',
+      paint: {
+        'line-color': ['case', ['boolean', ['feature-state', 'hover'], false], 'rgba(255,255,255,0.9)', 'rgba(255,255,255,0.12)'],
+        'line-width': ['case', ['boolean', ['feature-state', 'hover'], false], 1.5, 0.5],
+      },
+    });
+
+    updateLegend(activeKey, geojson.features);
+    document.getElementById('loading').classList.add('hidden');
+    setupInteractivity();
+  } catch (e) {
+    document.querySelector('.loading-text').textContent = 'Failed to load data';
+    document.querySelector('.loading-sub').textContent = e.message;
+    console.error(e);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────
+// Layer switching
+// ──────────────────────────────────────────────────────────────
+document.querySelectorAll('.layer-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.key;
+    if (key === activeKey) return;
+    document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeKey = key;
+    if (geojson) {
+      map.setPaintProperty('tracts-fill', 'fill-color',
+        buildColorExpr(geojson.features, activeKey, LAYERS[activeKey].colors));
+      updateLegend(activeKey, geojson.features);
+    }
+  });
+});
+
+// ──────────────────────────────────────────────────────────────
+// Legend
+// ──────────────────────────────────────────────────────────────
+function updateLegend(key, features) {
+  const cfg = LAYERS[key];
+  document.getElementById('legend-bar').style.background = cfg.gradient;
+  document.getElementById('legend-min').textContent = cfg.legendLow;
+  document.getElementById('legend-max').textContent = cfg.legendHigh;
+  document.getElementById('legend-title').textContent = cfg.label;
+  document.getElementById('layer-desc').textContent = cfg.desc;
+
+  const med = median(features, key);
+  const vals = features.map(f => f.properties[key]).filter(v => v != null).sort((a,b)=>a-b);
+  document.getElementById('stat-median').textContent = med != null ? fmt(med, key) : '—';
+  document.getElementById('stat-lowest').textContent = vals.length ? fmt(vals[0], key) : '—';
+}
+
+// ──────────────────────────────────────────────────────────────
+// Interactivity (hover + click)
+// ──────────────────────────────────────────────────────────────
+let hoveredId = null;
+const tooltip = document.getElementById('tooltip');
+
+function setupInteractivity() {
+  map.on('mousemove', 'tracts-fill', e => {
+    if (!e.features.length) return;
+    const feat = e.features[0];
+    const props = feat.properties;
+    const id = feat.id;
+
+    if (hoveredId && hoveredId !== id) {
+      map.setFeatureState({ source: 'tracts', id: hoveredId }, { hover: false });
+    }
+    hoveredId = id;
+    map.setFeatureState({ source: 'tracts', id: id }, { hover: true });
+    map.getCanvas().style.cursor = 'pointer';
+
+    // Position tooltip
+    const { x, y } = e.point;
+    const sidebar_w = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w'));
+    const tx = Math.min(x + 16, window.innerWidth - 240);
+    const ty = Math.min(y - 10, window.innerHeight - 160);
+    tooltip.style.left = tx + 'px';
+    tooltip.style.top = ty + 'px';
+    tooltip.style.display = 'block';
+
+    const val = props[activeKey];
+    const cfg = LAYERS[activeKey];
+    document.getElementById('tt-name').textContent = props.NAME || 'Census Tract';
+    document.getElementById('tt-main').style.color = cfg.layerColor;
+
+    if (val != null) {
+      document.getElementById('tt-main').textContent = cfg.format(val);
+    } else {
+      document.getElementById('tt-main').textContent = 'No data';
+    }
+    document.getElementById('tt-label').textContent = cfg.label;
+    document.getElementById('tt-income').textContent = fmtIncome(props.median_income);
+    document.getElementById('tt-poverty').textContent = props.poverty_rate != null ? props.poverty_rate.toFixed(1) + '%' : '—';
+    document.getElementById('tt-renters').textContent = props.renter_rate != null ? props.renter_rate.toFixed(1) + '%' : '—';
+  });
+
+  map.on('mouseleave', 'tracts-fill', () => {
+    if (hoveredId) {
+      map.setFeatureState({ source: 'tracts', id: hoveredId }, { hover: false });
+      hoveredId = null;
+    }
+    map.getCanvas().style.cursor = '';
+    tooltip.style.display = 'none';
+  });
+
+  map.on('click', 'tracts-fill', e => {
+    if (!e.features.length) return;
+    const props = e.features[0].properties;
+    openDetail(props);
+  });
+}
+
+// ──────────────────────────────────────────────────────────────
+// Detail panel
+// ──────────────────────────────────────────────────────────────
+function bar(pct, color) {
+  return `<div class="metric-bar-bg"><div class="metric-bar" style="width:${Math.max(0,Math.min(100,pct||0))}%;background:${color}"></div></div>`;
+}
+
+function metricRow(label, val, pct, color) {
+  const display = val != null ? val : '<span class="no-data-badge">no data</span>';
+  return `
+    <div class="metric-item">
+      <div class="metric-row">
+        <span class="metric-name">${label}</span>
+        <span class="metric-val">${display}</span>
+      </div>
+      ${pct != null ? bar(pct, color) : ''}
+    </div>`;
+}
+
+function openDetail(props) {
+  document.getElementById('detail-borough').textContent = props.borough || '';
+  document.getElementById('detail-name').textContent = props.NAME || 'Census Tract';
+
+  const acPct = props.ac_pct;
+  const noAcPct = props.no_ac_pct;
+  const bgColor = noAcPct != null
+    ? `rgba(${Math.round(noAcPct * 5)},${Math.round(40)},${Math.round(40)},0.4)`
+    : 'rgba(30,40,60,0.8)';
+
+  const scroll = document.getElementById('detail-scroll');
+  scroll.innerHTML = `
+
+    <!-- Big AC number -->
+    <div class="big-stat" style="background:${bgColor};border:1px solid rgba(255,255,255,0.08)">
+      <div class="big-num" style="color:${noAcPct != null && noAcPct > 15 ? '#f87171' : noAcPct != null && noAcPct > 8 ? '#fbbf24' : '#34d399'}">
+        ${noAcPct != null ? noAcPct.toFixed(1) + '%' : '—'}
+      </div>
+      <div class="big-sub">households without air conditioning</div>
+    </div>
+
+    ${noAcPct != null ? `
+    <div class="big-stat" style="background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.15);margin-bottom:12px">
+      <div class="big-num" style="color:#22d3ee;font-size:28px">
+        ${acPct != null ? acPct.toFixed(1) + '%' : '—'}
+      </div>
+      <div class="big-sub">${props.occupied_units != null ? Math.round(props.occupied_units).toLocaleString() + ' occupied units' : 'with air conditioning'}</div>
+    </div>` : ''}
+
+    <!-- Socioeconomic -->
+    <div class="metrics-section">
+      <div class="metrics-title">💰 Socioeconomic</div>
+      ${metricRow('Median Income', fmtIncome(props.median_income), null, null)}
+      ${metricRow('Poverty Rate', props.poverty_rate != null ? props.poverty_rate.toFixed(1) + '%' : null, props.poverty_rate, '#fb923c')}
+      ${metricRow('Renter-Occupied', props.renter_rate != null ? props.renter_rate.toFixed(1) + '%' : null, props.renter_rate, '#a78bfa')}
+    </div>
+
+    <!-- Demographics -->
+    <div class="metrics-section">
+      <div class="metrics-title">👥 Demographics</div>
+      ${metricRow('Population', props.total_pop != null ? Math.round(props.total_pop).toLocaleString() : null, null, null)}
+      ${metricRow('Elderly (65+)', props.elderly_rate != null ? props.elderly_rate.toFixed(1) + '%' : null, props.elderly_rate, '#fbbf24')}
+    </div>
+
+    <!-- Race / Ethnicity -->
+    <div class="metrics-section">
+      <div class="metrics-title">🔢 Race & Ethnicity</div>
+      <div class="race-stack">
+        <div style="width:${props.black_rate||0}%;background:#60a5fa"></div>
+        <div style="width:${props.hispanic_rate||0}%;background:#f87171"></div>
+        <div style="width:${props.white_rate||0}%;background:#e2e8f0"></div>
+        <div style="flex:1;background:rgba(255,255,255,0.07)"></div>
+      </div>
+      <div class="race-labels" style="margin-bottom:8px">
+        <span class="race-dot" style="--c:#60a5fa">Black ${props.black_rate != null ? props.black_rate.toFixed(0) + '%' : '—'}</span>
+        <span class="race-dot" style="--c:#f87171">Hispanic ${props.hispanic_rate != null ? props.hispanic_rate.toFixed(0) + '%' : '—'}</span>
+        <span class="race-dot" style="--c:#e2e8f0">White ${props.white_rate != null ? props.white_rate.toFixed(0) + '%' : '—'}</span>
+      </div>
+      ${metricRow('% Black', props.black_rate != null ? props.black_rate.toFixed(1) + '%' : null, props.black_rate, '#60a5fa')}
+      ${metricRow('% Hispanic', props.hispanic_rate != null ? props.hispanic_rate.toFixed(1) + '%' : null, props.hispanic_rate, '#f87171')}
+      ${metricRow('% White', props.white_rate != null ? props.white_rate.toFixed(1) + '%' : null, props.white_rate, '#cbd5e1')}
+    </div>
+
+    <!-- LACE info -->
+    <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
+      <div class="metrics-title">ℹ️ Data Source</div>
+      <p style="font-size:11px;color:var(--text-3);line-height:1.5">
+        AC data: <a href="https://www.census.gov/data/experimental-data-products/lace.html" target="_blank" style="color:var(--blue)">LACE 2023</a> (US Census / ASU)<br>
+        Socioeconomic: ACS 5-Year 2022<br>
+        GEOID: ${props.GEOID || '—'}
+      </p>
+    </div>
+  `;
+
+  document.getElementById('detail').classList.add('open');
+}
+
+document.getElementById('close-detail').addEventListener('click', () => {
+  document.getElementById('detail').classList.remove('open');
+});
+
+// ──────────────────────────────────────────────────────────────
+// Scatter plots
+// ──────────────────────────────────────────────────────────────
+const BOROUGH_COLORS = {
+  Manhattan:    'rgba(248,113,113,0.55)',
+  Brooklyn:     'rgba(251,191,36,0.55)',
+  Queens:       'rgba(52,211,153,0.55)',
+  Bronx:        'rgba(96,165,250,0.55)',
+  'Staten Island': 'rgba(192,132,252,0.55)',
+};
+
+function linReg(xs, ys) {
+  const n = xs.length;
+  const mx = xs.reduce((a, b) => a + b) / n;
+  const my = ys.reduce((a, b) => a + b) / n;
+  const num = xs.reduce((s, x, i) => s + (x - mx) * (ys[i] - my), 0);
+  const den = xs.reduce((s, x) => s + (x - mx) ** 2, 0);
+  const m = den ? num / den : 0;
+  const b = my - m * mx;
+  const r = den ? num / Math.sqrt(den * ys.reduce((s, y) => s + (y - my) ** 2, 0)) : 0;
+  return { m, b, r };
+}
+
+function niceTick(val, fmt) {
+  if (fmt === 'dollar') return val >= 1000 ? `$${Math.round(val / 1000)}K` : `$${val}`;
+  return val.toFixed(0) + '%';
+}
+
+function drawChart(canvas, features, xKey, yKey, xFmt, title) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const W = Math.round(rect.width)  || 300;
+  const H = Math.round(rect.height) || 240;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const ML = 46, MR = 12, MT = 14, MB = 36;
+  const PW = W - ML - MR, PH = H - MT - MB;
+
+  const pts = features
+    .map(f => ({ x: f.properties[xKey], y: f.properties[yKey], b: f.properties.borough }))
+    .filter(p => p.x != null && p.y != null);
+
+  if (pts.length < 5) return;
+
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  const xMin = Math.min(...xs), xMax = Math.max(...xs);
+  const yMin = Math.max(0, Math.min(...ys) - 1), yMax = Math.min(100, Math.max(...ys) + 1);
+
+  const cx = x => ML + (x - xMin) / (xMax - xMin) * PW;
+  const cy = y => MT + PH - (y - yMin) / (yMax - yMin) * PH;
+
+  // Background
+  ctx.fillStyle = '#0a0f1a';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const gy = MT + (i / 4) * PH;
+    ctx.beginPath(); ctx.moveTo(ML, gy); ctx.lineTo(ML + PW, gy); ctx.stroke();
+    const gx = ML + (i / 4) * PW;
+    ctx.beginPath(); ctx.moveTo(gx, MT); ctx.lineTo(gx, MT + PH); ctx.stroke();
+  }
+
+  // Axis border
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.strokeRect(ML, MT, PW, PH);
+
+  // Points
+  for (const p of pts) {
+    ctx.fillStyle = BOROUGH_COLORS[p.b] || 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.arc(cx(p.x), cy(p.y), 2.8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Regression line + CI band
+  const { m, b, r } = linReg(xs, ys);
+  const x0 = xMin, x1 = xMax;
+  const y0 = m * x0 + b, y1 = m * x1 + b;
+
+  // Shaded band (±1 residual std dev)
+  const resids = pts.map(p => p.y - (m * p.x + b));
+  const resSd = Math.sqrt(resids.reduce((s, e) => s + e * e, 0) / resids.length);
+  ctx.beginPath();
+  ctx.moveTo(cx(x0), cy(y0 + resSd));
+  ctx.lineTo(cx(x1), cy(y1 + resSd));
+  ctx.lineTo(cx(x1), cy(y1 - resSd));
+  ctx.lineTo(cx(x0), cy(y0 - resSd));
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(cx(x0), cy(y0));
+  ctx.lineTo(cx(x1), cy(y1));
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // r annotation
+  const rColor = Math.abs(r) > 0.4 ? '#fbbf24' : '#64748b';
+  ctx.font = `bold 10px Inter, system-ui`;
+  ctx.fillStyle = rColor;
+  ctx.textAlign = 'right';
+  ctx.fillText(`r = ${r.toFixed(2)}`, ML + PW - 4, MT + 12);
+
+  // Y axis ticks (no AC %)
+  ctx.fillStyle = '#475569';
+  ctx.font = '9.5px Inter, system-ui';
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= 4; i++) {
+    const y = MT + (i / 4) * PH;
+    const val = yMax - (i / 4) * (yMax - yMin);
+    ctx.fillText(val.toFixed(0) + '%', ML - 4, y + 3.5);
+  }
+
+  // X axis ticks
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= 4; i++) {
+    const x = ML + (i / 4) * PW;
+    const val = xMin + (i / 4) * (xMax - xMin);
+    ctx.fillText(niceTick(val, xFmt), x, MT + PH + 13);
+  }
+
+  // Y axis label
+  ctx.save();
+  ctx.translate(10, MT + PH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = '#64748b';
+  ctx.textAlign = 'center';
+  ctx.font = '9.5px Inter, system-ui';
+  ctx.fillText('% Without AC', 0, 0);
+  ctx.restore();
+
+  // X axis label
+  ctx.fillStyle = '#64748b';
+  ctx.textAlign = 'center';
+  ctx.font = '9.5px Inter, system-ui';
+  ctx.fillText(title, ML + PW / 2, H - 5);
+}
+
+const CHART_CONFIGS = [
+  { xKey: 'median_income', xFmt: 'dollar', title: 'Median Household Income', label: 'Income vs. No-AC' },
+  { xKey: 'poverty_rate',  xFmt: 'pct',   title: 'Poverty Rate (%)',          label: 'Poverty vs. No-AC' },
+  { xKey: 'renter_rate',   xFmt: 'pct',   title: 'Renter-Occupied (%)',       label: 'Renters vs. No-AC' },
+  { xKey: 'elderly_rate',  xFmt: 'pct',   title: 'Elderly (65+) (%)',         label: 'Elderly vs. No-AC' },
+  { xKey: 'black_rate',    xFmt: 'pct',   title: '% Black',                   label: 'Race (Black) vs. No-AC' },
+  { xKey: 'hispanic_rate', xFmt: 'pct',   title: '% Hispanic/Latino',         label: 'Ethnicity (Hispanic) vs. No-AC' },
+];
+
+let chartsBuilt = false;
+
+function buildCharts() {
+  if (chartsBuilt || !geojson) return;
+  chartsBuilt = true;
+  const grid = document.getElementById('charts-grid');
+  grid.innerHTML = '';
+  for (const cfg of CHART_CONFIGS) {
+    const cell = document.createElement('div');
+    cell.className = 'chart-cell';
+    const canvas = document.createElement('canvas');
+    canvas.style.width  = '100%';
+    canvas.style.height = '100%';
+    cell.appendChild(canvas);
+    grid.appendChild(cell);
+    // Draw after layout
+    requestAnimationFrame(() => drawChart(canvas, geojson.features, cfg.xKey, 'no_ac_pct', cfg.xFmt, cfg.title));
+  }
+}
+
+document.getElementById('show-charts').addEventListener('click', () => {
+  chartsBuilt = false;
+  document.getElementById('charts-panel').classList.add('open');
+  // wait for CSS transition (300ms) + a frame before measuring
+  setTimeout(() => buildCharts(), 350);
+});
+document.getElementById('close-charts').addEventListener('click', () => {
+  document.getElementById('charts-panel').classList.remove('open');
+});
+
+// ──────────────────────────────────────────────────────────────
+// Hide zoom hint after first interaction
+map.once('movestart', () => {
+  document.getElementById('zoom-hint').style.opacity = '0';
+  setTimeout(() => document.getElementById('zoom-hint').remove(), 500);
+});
+</script>
+</body>
+</html>
