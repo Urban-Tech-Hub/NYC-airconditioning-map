@@ -6,3 +6,4 @@ uv.lock
 .playwright-mcp/
 map-*.png
 charts-*.png
+.DS_Store
