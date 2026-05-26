@@ -453,6 +453,9 @@
             <button class="layer-btn" data-key="renter_rate" style="--layer-color:#a78bfa">Renters</button>
             <button class="layer-btn" data-key="elderly_rate" style="--layer-color:#fbbf24">Elderly (65+)</button>
           </div>
+          <div class="layer-row" style="margin-top:4px">
+            <button class="layer-btn" data-key="avg_household_size" style="--layer-color:#2dd4bf">Household Size</button>
+          </div>
         </div>
 
         <div class="layer-group">
@@ -680,6 +683,17 @@ const LAYERS = {
     layerColor: '#e2e8f0',
     legendLow: '0%',
     legendHigh: '100%',
+  },
+  avg_household_size: {
+    label: 'Avg Household Size',
+    unit: '',
+    format: v => v.toFixed(2),
+    desc: 'Average number of people per occupied housing unit (ACS 2022, table B25010). Larger households may face greater heat exposure per AC unit.',
+    colors: ['#f0fdfa','#99f6e4','#5eead4','#2dd4bf','#0d9488','#134e4a'],
+    gradient: 'linear-gradient(90deg,#f0fdfa,#5eead4,#134e4a)',
+    layerColor: '#2dd4bf',
+    legendLow: 'Smaller',
+    legendHigh: 'Larger',
   },
 };
 
@@ -936,6 +950,7 @@ function openDetail(props) {
     <div class="metrics-section">
       <div class="metrics-title">👥 Demographics</div>
       ${metricRow('Population', props.total_pop != null ? Math.round(props.total_pop).toLocaleString() : null, null, null)}
+      ${metricRow('Avg Household Size', props.avg_household_size != null ? props.avg_household_size.toFixed(2) : null, null, null)}
       ${metricRow('Elderly (65+)', props.elderly_rate != null ? props.elderly_rate.toFixed(1) + '%' : null, props.elderly_rate, '#fbbf24')}
     </div>
 
@@ -1001,6 +1016,7 @@ function linReg(xs, ys) {
 
 function niceTick(val, fmt) {
   if (fmt === 'dollar') return val >= 1000 ? `$${Math.round(val / 1000)}K` : `$${val}`;
+  if (fmt === 'num') return val.toFixed(1);
   return val.toFixed(0) + '%';
 }
 
@@ -1123,12 +1139,12 @@ function drawChart(canvas, features, xKey, yKey, xFmt, title) {
 }
 
 const CHART_CONFIGS = [
-  { xKey: 'median_income', xFmt: 'dollar', title: 'Median Household Income', label: 'Income vs. No-AC' },
-  { xKey: 'poverty_rate',  xFmt: 'pct',   title: 'Poverty Rate (%)',          label: 'Poverty vs. No-AC' },
-  { xKey: 'renter_rate',   xFmt: 'pct',   title: 'Renter-Occupied (%)',       label: 'Renters vs. No-AC' },
-  { xKey: 'elderly_rate',  xFmt: 'pct',   title: 'Elderly (65+) (%)',         label: 'Elderly vs. No-AC' },
-  { xKey: 'black_rate',    xFmt: 'pct',   title: '% Black',                   label: 'Race (Black) vs. No-AC' },
-  { xKey: 'hispanic_rate', xFmt: 'pct',   title: '% Hispanic/Latino',         label: 'Ethnicity (Hispanic) vs. No-AC' },
+  { xKey: 'median_income',      xFmt: 'dollar', title: 'Median Household Income', label: 'Income vs. No-AC' },
+  { xKey: 'poverty_rate',       xFmt: 'pct',    title: 'Poverty Rate (%)',          label: 'Poverty vs. No-AC' },
+  { xKey: 'renter_rate',        xFmt: 'pct',    title: 'Renter-Occupied (%)',       label: 'Renters vs. No-AC' },
+  { xKey: 'elderly_rate',       xFmt: 'pct',    title: 'Elderly (65+) (%)',         label: 'Elderly vs. No-AC' },
+  { xKey: 'avg_household_size', xFmt: 'num',    title: 'Avg Household Size',        label: 'Household Size vs. No-AC' },
+  { xKey: 'black_rate',         xFmt: 'pct',    title: '% Black',                   label: 'Race (Black) vs. No-AC' },
 ];
 
 let chartsBuilt = false;

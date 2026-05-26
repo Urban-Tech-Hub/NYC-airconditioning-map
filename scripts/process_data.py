@@ -28,7 +28,7 @@ CARTOGRAPHIC_URL = "https://www2.census.gov/geo/tiger/GENZ2022/shp/cb_2022_36_tr
 CENSUSREPORTER_URL = "https://api.censusreporter.org/1.0/data/show/latest"
 
 # CensusReporter table IDs
-ACS_TABLES = "B19013,B17001,B25003,B02001,B03002,B01001"
+ACS_TABLES = "B19013,B17001,B25003,B02001,B03002,B01001,B25010"
 BATCH_SIZE = 50  # CensusReporter handles ~100 but 50 is reliable
 
 
@@ -125,6 +125,8 @@ def download_acs(geoids: list[str]) -> pd.DataFrame:
 
         hisp_denom = e("B03002", "B03002001") or 0
         row["hispanic_rate"] = round((e("B03002", "B03002012") or 0) / hisp_denom * 100, 1) if hisp_denom else None
+
+        row["avg_household_size"] = e("B25010", "B25010001")
 
         rows.append(row)
 
